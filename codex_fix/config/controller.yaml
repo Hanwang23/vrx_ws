@@ -1,0 +1,246 @@
+autonomous_usv:
+  ros__parameters:
+    use_sim_time: true
+
+    # auto accepts VRX wayfinding or stationkeeping goal topics.
+    # custom uses custom_waypoints below.
+    task_mode: auto
+    start_without_task: false
+    control_rate_hz: 20.0
+    # Wall-clock receive watchdog. Keep above 2 s for slow GUI rendering.
+    sensor_timeout: 2.5
+    stop_on_control_conflict: true
+
+    # For custom mode, add custom_waypoints here. Each value uses
+    # "latitude,longitude,yaw_deg"; yaw is optional. See README.md.
+
+    topics:
+      gps: /wamv/sensors/gps/gps/fix
+      imu: /wamv/sensors/imu/imu/data
+      lidar: /wamv/sensors/lidars/lidar_wamv_sensor/scan
+      lidar_points: /wamv/sensors/lidars/lidar_wamv_sensor/points
+      waypoints: /vrx/wayfinding/waypoints
+      stationkeeping_goal: /vrx/stationkeeping/goal
+      task_info: /vrx/task/info
+      left_thrust: /wamv/thrusters/left/thrust
+      right_thrust: /wamv/thrusters/right/thrust
+      left_position: /wamv/thrusters/left/pos
+      right_position: /wamv/thrusters/right/pos
+      debug_markers: /autonomous_usv/debug_markers
+      buoy_candidates: /autonomous_usv/buoy_candidates
+      rolling_grid: /autonomous_usv/rolling_grid
+      filtered_odometry: /odometry/filtered
+      gps_origin: /autonomous_usv/gps_origin
+      dynamic_targets: /autonomous_usv/dynamic_targets
+
+    debug:
+      publish_markers: true
+      frame: wamv/wamv/base_link
+      publish_rate_hz: 5.0
+
+    ekf:
+      enabled: true
+      position_process_noise: 0.15
+      velocity_process_noise: 0.8
+      yaw_process_noise_deg: 2.0
+      yaw_rate_process_noise_deg_s: 8.0
+      default_gps_std: 1.5
+      default_yaw_std_deg: 3.0
+      default_yaw_rate_std_deg_s: 2.0
+      velocity_measurement_std: 0.8
+      innovation_gate_sigma: 6.0
+      max_speed: 15.0
+      max_position_std: 8.0
+
+    # Prefer robot_localization when its output is fresh and agrees with the
+    # independent PlanarEKF. The independent filter remains the live fallback.
+    robot_localization:
+      enabled: true
+      timeout: 1.0
+      max_position_std: 8.0
+      max_yaw_std_deg: 15.0
+      max_disagreement_m: 8.0
+
+    map:
+      enabled: true
+      frame: wamv/wamv/base_link
+      width_m: 100.0
+      height_m: 100.0
+      resolution: 0.5
+      max_range: 40.0
+      hit_log_odds: 0.85
+      miss_log_odds: -0.40
+      decay_rate: 0.08
+      stale_after: 8.0
+      occupied_probability: 0.65
+      inflation_radius: 3.0
+      cloud_track_min_hits: 5
+      ray_stride: 2
+      publish_rate_hz: 2.0
+
+    colregs:
+      enabled: true
+      # Anonymous point-cloud clusters can jump between static buoys. Only a
+      # dedicated detector/tracker in codex_odom may activate COLREGs by default.
+      use_pointcloud_tracks: false
+      target_frame: codex_odom
+      match_distance: 4.0
+      track_timeout: 4.0
+      position_gain: 0.65
+      velocity_gain: 0.35
+      minimum_hits: 8
+      minimum_target_speed: 0.5
+      max_target_speed: 15.0
+      safety_radius: 15.0
+      time_horizon: 120.0
+      map_mask_radius: 4.0
+
+    # Disabled by default to keep evaluation output deterministic. Enable this
+    # to collect a persistently exciting identification run before NMPC work.
+    model_identification:
+      enabled: false
+      log_path: codex_fix/model_data/usv_identification.csv
+      log_rate_hz: 10.0
+
+    model_control:
+      requested_backend: ilos_pid
+      fitted_model_path: ''
+
+    limits:
+      max_thrust: 1800.0
+      max_surge_thrust: 500.0
+      max_reverse_thrust: 500.0
+      max_turn_thrust: 160.0
+      # Yaw damping falls at low surge speed, so pivot torque is scheduled down.
+      max_low_speed_turn_thrust: 80.0
+      turn_full_gain_speed: 1.2
+      # Nonlinear heading-to-yaw-rate scheduling turns quickly at large errors
+      # and smoothly reduces rate near the requested final orientation.
+      max_alignment_thrust: 60.0
+      max_alignment_brake_thrust: 90.0
+      alignment_heading_rate_gain: 0.35
+      alignment_yaw_rate_gain: 350.0
+      max_alignment_yaw_rate_deg_s: 5.0
+      # Rate-reference governor: final-yaw commands cannot reverse instantly.
+      max_alignment_yaw_acceleration_deg_s2: 2.5
+      # Normal navigation also uses a rate-damped heading loop. This avoids
+      # derivative kicks when the local obstacle planner changes its heading.
+      navigation_heading_rate_gain: 0.55
+      navigation_yaw_rate_gain: 700.0
+      max_navigation_yaw_rate_deg_s: 12.0
+      # Reference governor: local-plan heading changes cannot reverse the
+      # requested yaw rate instantaneously.
+      max_navigation_yaw_acceleration_deg_s2: 5.0
+      yaw_rate_slowdown_start_deg_s: 8.0
+      yaw_rate_slowdown_stop_deg_s: 20.0
+    forward_thrust_sign: 1.0
+
+    navigation:
+      cruise_speed: 1.6
+      minimum_approach_speed: 0.35
+      approach_gain: 0.14
+      position_tolerance: 2.0
+      # Once captured, do not resume position chasing until drift exceeds this.
+      waypoint_exit_tolerance: 4.0
+      station_exit_tolerance: 4.0
+      heading_tolerance_deg: 8.0
+      yaw_rate_tolerance_deg_s: 3.0
+      # Relaxed exit thresholds prevent IMU noise from resetting dwell timing.
+      heading_exit_tolerance_deg: 12.0
+      yaw_rate_exit_tolerance_deg_s: 8.0
+      waypoint_dwell_time: 1.0
+      speed_feedforward: 260.0
+      # Normal approach can use limited reverse thrust to remove inertia;
+      # emergency obstacle braking remains a separate, stronger state.
+      max_normal_brake_thrust: 240.0
+      speed_brake_deadband: 0.20
+      normal_brake_distance: 22.0
+      nearest_neighbor_order: true
+
+    guidance:
+      enabled: true
+      # The 8 m geometry is retained for the compact course, while curvature
+      # preview slows the vessel before each arc to keep it dynamically feasible.
+      dubins_turn_radius: 8.0
+      dubins_sample_step: 0.5
+      # CCC paths reverse curvature instantly; keep their solver available for
+      # tests, but use inertia-friendly CSC paths on the WAM-V.
+      dubins_allow_three_turn_paths: false
+      # ILOS rejects cross-current and steady lateral model bias.
+      ilos_lookahead: 8.0
+      ilos_integral_gain: 0.015
+      ilos_integral_limit: 3.0
+      ilos_correction_limit_deg: 45.0
+      ilos_integral_min_speed: 0.4
+      # r_ff = gain * speed * path_curvature; lateral acceleration also caps
+      # speed on curves before the yaw-rate loop reaches saturation.
+      curvature_feedforward_gain: 1.0
+      max_lateral_acceleration: 0.12
+      # Once local avoidance releases control, rebuild the global path only
+      # when the old path would require an aggressive cross-course return.
+      replan_path_deviation: 8.0
+      replan_cooldown: 5.0
+      lattice_enabled: true
+      lattice_heading_bins: 16
+      lattice_planning_horizon: 40.0
+      lattice_analytic_expansion_distance: 12.0
+      lattice_max_expansions: 2500
+      lattice_turn_penalty: 0.05
+      lattice_replan_distance: 6.0
+      lattice_blocked_path_confirmations: 2
+      lattice_path_check_stride: 4
+      lattice_start_clearance_radius: 4.0
+
+    avoidance:
+      enabled: true
+      require_lidar: true
+      warning_distance: 22.0
+      emergency_distance: 5.5
+      front_angle_deg: 65.0
+      planning_angle_deg: 100.0
+      # Hull collision width is about 2.53 m. These margins include buoy
+      # radius, tracking error, and a larger envelope while selecting gaps.
+      safety_radius: 3.0
+      path_half_width: 2.4
+      bin_size_deg: 3.0
+      direction_hysteresis_deg: 12.0
+      cluster_range_tolerance: 0.8
+      brake_time_horizon: 2.5
+      # Slow and steer in the caution zone; reverse only at true emergency range.
+      emergency_time_horizon: 0.5
+      caution_speed: 0.55
+      brake_gain: 450.0
+      clear_hold_time: 0.5
+      stuck_timeout: 5.0
+      backup_duration: 2.0
+      backup_thrust: 350.0
+      # In the terminal capture region, slow progress is intentional and must
+      # not trigger the obstacle-stuck backup state.
+      terminal_recovery_disable_radius: 8.0
+      scan_cache_timeout: 0.5
+      cloud_track_timeout: 2.5
+      # The cloud path fits the water plane before clustering low targets.
+      cloud_min_height: -1.75
+      cloud_min_above_water: 0.10
+      cloud_cluster_cell_size: 0.45
+      cloud_cluster_min_points: 3
+      cloud_track_min_hits: 2
+      cloud_track_match_distance: 0.8
+      # Reject point clouds that cannot be matched to a nearby GNSS/IMU pose,
+      # and downsample before Python plane fitting to protect the control loop.
+      cloud_pose_tolerance: 0.5
+      cloud_point_stride: 4
+      cloud_sensor_offset_x: 1.55
+      cloud_sensor_offset_y: 0.0
+
+    heading_pid:
+      kp: 600.0
+      ki: 18.0
+      kd: 120.0
+      integral_limit: 1.0472
+
+    speed_pid:
+      kp: 260.0
+      ki: 35.0
+      kd: 20.0
+      integral_limit: 8.0

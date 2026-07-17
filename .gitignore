@@ -7,6 +7,7 @@ log/
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
 
 # VS Code 配置
 .vscode/
@@ -26,6 +27,10 @@ __pycache__/
 # ROS bag 文件
 *.bag
 *.db3
+
+# 自主控制器运行产物
+codex_fix/evaluation/
+codex_fix/model_data/
 
 # Claude Code 配置
 .claude/
