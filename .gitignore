@@ -29,8 +29,9 @@ __pycache__/
 *.db3
 
 # 自主控制器运行产物
-codex_fix/evaluation/
-codex_fix/model_data/
+han_usv_controller/evaluation/
+han_usv_controller/model_data/
+han_usv_controller/proc/
 
 # Claude Code 配置
 .claude/

@@ -1,0 +1,11 @@
+flowchart TD
+    A["本条对话修改需求"] --> B["功能拆分：定位 / 地图 / 规划 / 控制 / 规则 / 可视化 / 评测"]
+    B --> C["实现 han_usv_controller ROS2 包"]
+    C --> D["Launch 整合：colregs_learning.launch.py"]
+    D --> E["仿真场景：Wayfinding + 12 枚浮标 + 2 艘动态船"]
+    E --> F["控制链：EKF -> 滚动地图 -> State Lattice -> ILOS/PID"]
+    E --> G["监督链：动态目标 -> CPA/TCPA -> COLREGs 偏置/降速"]
+    F --> H["RViz：路径 / 轨迹 / XTE / 栅格 / 浮标候选"]
+    G --> H
+    H --> I["自动验收：run_colregs_learning.sh"]
+    I --> J["证据：100% 完成、0 碰撞、189 个 COLREGs 激活样本、0 fallback"]
