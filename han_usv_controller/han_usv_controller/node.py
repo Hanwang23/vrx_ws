@@ -492,6 +492,20 @@ class AutonomousUSVNode(Node):
             'limits.max_alignment_yaw_acceleration_deg_s2': 2.5,
             'limits.navigation_heading_rate_gain': 0.55,
             'limits.navigation_yaw_rate_gain': 700.0,
+            'heading_control.mode': 'nftsm',
+            'heading_control.smc_beta': 0.8,
+            'heading_control.smc_gamma': 1.0,
+            'heading_control.smc_alpha': 0.6,
+            'heading_control.smc_switching_gain': 0.12,
+            'heading_control.smc_boundary_layer': 0.15,
+            'heading_control.smc_integral_limit_deg_s': 45.0,
+            'heading_control.smc_safe_yaw_rate_deg_s': 0.5,
+            'heading_control.asmc_surface_gain': 0.55,
+            'heading_control.asmc_adaptation_rate': 0.35,
+            'heading_control.asmc_gain_min_deg_s': 0.57,
+            'heading_control.asmc_gain_max_deg_s': 5.73,
+            'heading_control.asmc_gain_decay': 0.30,
+            'heading_control.asmc_boundary_layer_deg_s': 4.58,
             'limits.max_navigation_yaw_rate_deg_s': 12.0,
             'limits.max_navigation_yaw_acceleration_deg_s2': 5.0,
             'limits.yaw_rate_slowdown_start_deg_s': 8.0,
@@ -616,6 +630,31 @@ class AutonomousUSVNode(Node):
                 'limits.navigation_heading_rate_gain'),
             navigation_yaw_rate_gain=self._float_parameter(
                 'limits.navigation_yaw_rate_gain'),
+            heading_control_mode=str(
+                self.get_parameter('heading_control.mode').value).lower(),
+            smc_beta=self._float_parameter('heading_control.smc_beta'),
+            smc_gamma=self._float_parameter('heading_control.smc_gamma'),
+            smc_alpha=self._float_parameter('heading_control.smc_alpha'),
+            smc_switching_gain=self._float_parameter(
+                'heading_control.smc_switching_gain'),
+            smc_boundary_layer=self._float_parameter(
+                'heading_control.smc_boundary_layer'),
+            smc_integral_limit=math.radians(self._float_parameter(
+                'heading_control.smc_integral_limit_deg_s')),
+            smc_safe_yaw_rate=math.radians(self._float_parameter(
+                'heading_control.smc_safe_yaw_rate_deg_s')),
+            asmc_surface_gain=self._float_parameter(
+                'heading_control.asmc_surface_gain'),
+            asmc_adaptation_rate=self._float_parameter(
+                'heading_control.asmc_adaptation_rate'),
+            asmc_gain_min=math.radians(self._float_parameter(
+                'heading_control.asmc_gain_min_deg_s')),
+            asmc_gain_max=math.radians(self._float_parameter(
+                'heading_control.asmc_gain_max_deg_s')),
+            asmc_gain_decay=self._float_parameter(
+                'heading_control.asmc_gain_decay'),
+            asmc_boundary_layer=math.radians(self._float_parameter(
+                'heading_control.asmc_boundary_layer_deg_s')),
             max_navigation_yaw_rate=math.radians(self._float_parameter(
                 'limits.max_navigation_yaw_rate_deg_s')),
             max_navigation_yaw_acceleration=math.radians(
@@ -1804,6 +1843,15 @@ class AutonomousUSVNode(Node):
                 command.yaw_rate_feedforward),
             'desired_yaw_rate_deg_s': math.degrees(
                 command.desired_yaw_rate),
+            'turn_thrust': command.turn_thrust,
+            'turn_limit': command.turn_limit,
+            'heading_control_mode': self.controller.config.heading_control_mode,
+            'nftsm_sliding_surface_deg_s': math.degrees(
+                self.controller.sliding_mode.sliding_surface),
+            'asmc_adaptive_gain_deg_s': math.degrees(
+                self.controller.adaptive_sliding_mode.adaptive_gain),
+            'asmc_sliding_surface_deg_s': math.degrees(
+                self.controller.adaptive_sliding_mode.sliding_surface),
             'cloud_track_count': len(self.cloud_tracks),
             'buoy_candidate_count': self.buoy_candidate_count,
             'gps_age_s': age(self.last_gps_time),

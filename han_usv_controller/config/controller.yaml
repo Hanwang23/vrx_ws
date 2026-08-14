@@ -135,6 +135,27 @@ autonomous_usv:
       yaw_rate_slowdown_stop_deg_s: 20.0
     forward_thrust_sign: 1.0
 
+    # Zhang Haofei, chapter 4: nonsingular fast terminal sliding-mode heading
+    # control. The smooth tanh switching term suppresses differential-thrust
+    # chattering. Available modes: pid, nftsm, and adaptive SMC (asmc).
+    heading_control:
+      mode: asmc
+      smc_beta: 0.8
+      smc_gamma: 1.0
+      smc_alpha: 0.6
+      smc_switching_gain: 0.12
+      smc_boundary_layer: 0.15
+      smc_integral_limit_deg_s: 45.0
+      smc_safe_yaw_rate_deg_s: 0.5
+      # ASMC uses s = (r_ff-r) + lambda*heading_error. Its switching gain grows
+      # outside the boundary layer and leaks back toward the minimum near s=0.
+      asmc_surface_gain: 0.55
+      asmc_adaptation_rate: 0.35
+      asmc_gain_min_deg_s: 0.57
+      asmc_gain_max_deg_s: 5.73
+      asmc_gain_decay: 0.30
+      asmc_boundary_layer_deg_s: 4.58
+
     navigation:
       cruise_speed: 1.6
       minimum_approach_speed: 0.35

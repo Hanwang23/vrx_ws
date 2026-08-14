@@ -3,10 +3,12 @@ import unittest
 from unittest.mock import patch
 
 from han_usv_controller.core import (
+    AdaptiveSlidingModeController,
     ControlConfig,
     ControllerCore,
     GeoTarget,
     GroundSpeedEstimator,
+    NonsingularFastTerminalSlidingModeController,
     PIDController,
     ReactiveAvoidance,
     VesselState,
@@ -43,6 +45,49 @@ class CoreMathTest(unittest.TestCase):
                 5.0,
             )
         self.assertAlmostEqual(pid.integral, 0.0)
+
+    def test_terminal_sliding_mode_is_bounded_and_smooth(self):
+        controller = NonsingularFastTerminalSlidingModeController()
+        outputs = [
+            controller.update(math.radians(20.0 - index), 0.0, 0.05, 0.2)
+            for index in range(10)
+        ]
+        self.assertTrue(all(abs(value) <= 0.2 for value in outputs))
+        self.assertTrue(all(math.isfinite(value) for value in outputs))
+
+    def test_terminal_sliding_mode_reset_clears_memory(self):
+        controller = NonsingularFastTerminalSlidingModeController()
+        controller.update(math.radians(10.0), 0.0, 0.1, 0.2)
+        self.assertNotEqual(controller.error_integral, 0.0)
+        controller.reset()
+        self.assertEqual(controller.error_integral, 0.0)
+        self.assertIsNone(controller.previous_error)
+
+    def test_adaptive_sliding_gain_grows_under_persistent_error(self):
+        controller = AdaptiveSlidingModeController(
+            adaptation_rate=1.0,
+            gain_min=0.01,
+            gain_max=0.2,
+            gain_decay=0.1,
+        )
+        initial_gain = controller.adaptive_gain
+        for _ in range(20):
+            output = controller.update(0.5, 0.0, 0.0, 0.05, 0.3)
+        self.assertGreater(controller.adaptive_gain, initial_gain)
+        self.assertLessEqual(abs(output), 0.3)
+
+    def test_adaptive_sliding_gain_decays_inside_boundary(self):
+        controller = AdaptiveSlidingModeController(
+            gain_min=0.01,
+            gain_max=0.2,
+            gain_decay=1.0,
+        )
+        controller.adaptive_gain = 0.15
+        for _ in range(20):
+            output = controller.update(0.0, 0.0, 0.0, 0.05, 0.3)
+        self.assertLess(controller.adaptive_gain, 0.15)
+        self.assertGreaterEqual(controller.adaptive_gain, controller.gain_min)
+        self.assertAlmostEqual(output, 0.0)
 
     def test_speed_estimator_keeps_velocity_direction(self):
         estimator = GroundSpeedEstimator(smoothing=1.0)
@@ -100,6 +145,15 @@ class CoreMathTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_control_config(ControlConfig(
                 max_alignment_yaw_rate=math.inf,
+            ))
+        with self.assertRaises(ValueError):
+            validate_control_config(ControlConfig(
+                heading_control_mode='unknown',
+            ))
+        with self.assertRaises(ValueError):
+            validate_control_config(ControlConfig(
+                asmc_gain_min=0.2,
+                asmc_gain_max=0.1,
             ))
 
 
@@ -920,6 +974,29 @@ class ControllerTest(unittest.TestCase):
         expected_turn = 1000.0 * math.radians(15.0)
         self.assertAlmostEqual(command.left_thrust, -expected_turn)
         self.assertAlmostEqual(command.right_thrust, expected_turn)
+
+    def test_asmc_mode_drives_turn_and_adapts_switching_gain(self):
+        config = ControlConfig(
+            heading_control_mode='asmc',
+            obstacle_avoidance_enabled=False,
+            guidance_enabled=False,
+            max_turn_thrust=900.0,
+            max_low_speed_turn_thrust=900.0,
+            navigation_yaw_rate_gain=1000.0,
+            max_navigation_yaw_acceleration=math.radians(1000.0),
+        )
+        controller = ControllerCore(config)
+        controller.set_targets([GeoTarget(0.001, 0.0)], 'wayfinding')
+
+        command = controller.update(
+            VesselState(0.0, 0.0, 0.0, 0.0, yaw_rate=0.0), 0.05)
+
+        self.assertGreater(command.desired_yaw_rate, 0.0)
+        self.assertGreater(command.right_thrust, command.left_thrust)
+        self.assertGreater(
+            controller.adaptive_sliding_mode.adaptive_gain,
+            config.asmc_gain_min,
+        )
 
     def test_normal_approach_uses_limited_reverse_thrust_to_remove_inertia(self):
         config = ControlConfig(

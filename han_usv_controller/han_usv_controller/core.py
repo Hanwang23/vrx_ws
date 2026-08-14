@@ -274,6 +274,146 @@ class PIDController:
         return output
 
 
+class NonsingularFastTerminalSlidingModeController:
+    """Paper-inspired finite-time heading controller with smooth switching.
+
+    The paper's yaw moment is represented here as a bounded yaw-rate request,
+    because VRX exposes differential thruster commands rather than the vessel
+    inertia and hydrodynamic moment terms used by its identified ship model.
+    """
+
+    def __init__(
+        self,
+        beta: float = 0.8,
+        gamma: float = 1.0,
+        alpha: float = 0.6,
+        switching_gain: float = 0.12,
+        boundary_layer: float = 0.15,
+        integral_limit: float = math.radians(45.0),
+        safe_yaw_rate: float = math.radians(0.5),
+    ) -> None:
+        self.beta = float(beta)
+        self.gamma = float(gamma)
+        self.alpha = float(alpha)
+        self.switching_gain = float(switching_gain)
+        self.boundary_layer = abs(float(boundary_layer))
+        self.integral_limit = abs(float(integral_limit))
+        self.safe_yaw_rate = abs(float(safe_yaw_rate))
+        self.error_integral = 0.0
+        self.previous_error: Optional[float] = None
+        self.sliding_surface = 0.0
+
+    def reset(self) -> None:
+        self.error_integral = 0.0
+        self.previous_error = None
+        self.sliding_surface = 0.0
+
+    def update(
+        self,
+        heading_error: float,
+        yaw_rate_feedforward: float,
+        dt: float,
+        output_limit: float,
+    ) -> float:
+        dt = clamp(float(dt), 1e-3, 0.5)
+        error = normalize_angle(float(heading_error))
+        self.error_integral = clamp(
+            self.error_integral + error * dt,
+            -self.integral_limit,
+            self.integral_limit,
+        )
+        error_rate = 0.0
+        if self.previous_error is not None:
+            error_rate = normalize_angle(error - self.previous_error) / dt
+        self.previous_error = error
+
+        # Equation (4-19), adapted to heading error and its measured derivative.
+        safe_rate = max(abs(error_rate), self.safe_yaw_rate)
+        rate_sign = (
+            1.0 if error_rate > 0.0
+            else -1.0 if error_rate < 0.0
+            else 0.0
+        )
+        terminal_term = self.gamma * safe_rate ** self.alpha * rate_sign
+        self.sliding_surface = (
+            error_rate + self.beta * self.error_integral + terminal_term)
+
+        # Equation (4-24): tanh supplies a continuous anti-chattering switch.
+        smooth_switch = self.switching_gain * math.tanh(
+            self.sliding_surface / max(1e-6, self.boundary_layer))
+        target = (
+            yaw_rate_feedforward
+            + self.beta * error
+            + terminal_term
+            + smooth_switch
+        )
+        return clamp(target, -abs(output_limit), abs(output_limit))
+
+
+class AdaptiveSlidingModeController:
+    """Model-light adaptive sliding-mode heading controller.
+
+    The adaptive switching gain grows while the sliding variable remains
+    outside the boundary layer and decays toward a minimum value near it.
+    This supplies disturbance rejection without requiring a fixed disturbance
+    upper bound, while tanh keeps the yaw-rate request continuous.
+    """
+
+    def __init__(
+        self,
+        surface_gain: float = 0.55,
+        adaptation_rate: float = 0.35,
+        gain_min: float = 0.01,
+        gain_max: float = 0.10,
+        gain_decay: float = 0.30,
+        boundary_layer: float = 0.08,
+    ) -> None:
+        self.surface_gain = float(surface_gain)
+        self.adaptation_rate = float(adaptation_rate)
+        self.gain_min = abs(float(gain_min))
+        self.gain_max = abs(float(gain_max))
+        self.gain_decay = float(gain_decay)
+        self.boundary_layer = abs(float(boundary_layer))
+        self.adaptive_gain = self.gain_min
+        self.sliding_surface = 0.0
+
+    def reset(self) -> None:
+        self.adaptive_gain = self.gain_min
+        self.sliding_surface = 0.0
+
+    def update(
+        self,
+        heading_error: float,
+        measured_yaw_rate: float,
+        yaw_rate_feedforward: float,
+        dt: float,
+        output_limit: float,
+    ) -> float:
+        dt = clamp(float(dt), 1e-3, 0.5)
+        error = normalize_angle(float(heading_error))
+        rate_error = float(yaw_rate_feedforward) - float(measured_yaw_rate)
+        self.sliding_surface = rate_error + self.surface_gain * error
+
+        excess = max(0.0, abs(self.sliding_surface) - self.boundary_layer)
+        gain_rate = self.adaptation_rate * excess
+        gain_rate -= self.gain_decay * max(
+            0.0, self.adaptive_gain - self.gain_min)
+        self.adaptive_gain = clamp(
+            self.adaptive_gain + gain_rate * dt,
+            self.gain_min,
+            self.gain_max,
+        )
+
+        switching = self.adaptive_gain * math.tanh(
+            self.sliding_surface / max(1e-6, self.boundary_layer))
+        target = (
+            yaw_rate_feedforward
+            + self.surface_gain * error
+            + switching
+        )
+        return clamp(target, -abs(output_limit), abs(output_limit))
+
+
 class GroundSpeedEstimator:
     """Low-pass horizontal speed estimate based on consecutive GNSS fixes."""
 
@@ -391,6 +531,20 @@ class ControlConfig:
     navigation_yaw_rate_gain: float = 700.0
     max_navigation_yaw_rate: float = math.radians(12.0)
     max_navigation_yaw_acceleration: float = math.radians(5.0)
+    heading_control_mode: str = 'pid'
+    smc_beta: float = 0.8
+    smc_gamma: float = 1.0
+    smc_alpha: float = 0.6
+    smc_switching_gain: float = 0.12
+    smc_boundary_layer: float = 0.15
+    smc_integral_limit: float = math.radians(45.0)
+    smc_safe_yaw_rate: float = math.radians(0.5)
+    asmc_surface_gain: float = 0.55
+    asmc_adaptation_rate: float = 0.35
+    asmc_gain_min: float = 0.01
+    asmc_gain_max: float = 0.10
+    asmc_gain_decay: float = 0.30
+    asmc_boundary_layer: float = 0.08
     yaw_rate_slowdown_start: float = math.radians(8.0)
     yaw_rate_slowdown_stop: float = math.radians(20.0)
     forward_thrust_sign: float = 1.0
@@ -534,6 +688,32 @@ def validate_control_config(config: ControlConfig) -> None:
         raise ValueError('speed brake deadband must not be negative')
     if config.curvature_feedforward_gain < 0.0:
         raise ValueError('curvature feedforward gain must not be negative')
+    if config.heading_control_mode not in ('pid', 'nftsm', 'asmc'):
+        raise ValueError('heading_control_mode must be pid, nftsm, or asmc')
+    if not 0.0 < config.smc_alpha < 1.0:
+        raise ValueError('smc_alpha must be between zero and one')
+    for name, value in (
+        ('smc_beta', config.smc_beta),
+        ('smc_gamma', config.smc_gamma),
+        ('smc_switching_gain', config.smc_switching_gain),
+        ('smc_boundary_layer', config.smc_boundary_layer),
+        ('smc_integral_limit', config.smc_integral_limit),
+        ('smc_safe_yaw_rate', config.smc_safe_yaw_rate),
+    ):
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f'{name} must be positive and finite')
+    for name, value in (
+        ('asmc_surface_gain', config.asmc_surface_gain),
+        ('asmc_adaptation_rate', config.asmc_adaptation_rate),
+        ('asmc_gain_min', config.asmc_gain_min),
+        ('asmc_gain_max', config.asmc_gain_max),
+        ('asmc_gain_decay', config.asmc_gain_decay),
+        ('asmc_boundary_layer', config.asmc_boundary_layer),
+    ):
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(f'{name} must be positive and finite')
+    if config.asmc_gain_min >= config.asmc_gain_max:
+        raise ValueError('asmc_gain_min must be below asmc_gain_max')
     if config.guidance_replan_cooldown < 0.0:
         raise ValueError('guidance replan cooldown must not be negative')
     if config.lattice_heading_bins < 8:
@@ -586,6 +766,8 @@ class ControlCommand:
     upcoming_curvature: float = 0.0
     yaw_rate_feedforward: float = 0.0
     desired_yaw_rate: float = 0.0
+    turn_thrust: float = 0.0
+    turn_limit: float = 0.0
     path_points_body: Tuple[Tuple[float, float], ...] = ()
     path_projection_body: Optional[Tuple[float, float]] = None
     lattice_expanded_states: int = 0
@@ -988,6 +1170,23 @@ class ControllerCore:
         ))
         self.navigation_yaw_rate_command = 0.0
         self.alignment_yaw_rate_command = 0.0
+        self.sliding_mode = NonsingularFastTerminalSlidingModeController(
+            beta=self.config.smc_beta,
+            gamma=self.config.smc_gamma,
+            alpha=self.config.smc_alpha,
+            switching_gain=self.config.smc_switching_gain,
+            boundary_layer=self.config.smc_boundary_layer,
+            integral_limit=self.config.smc_integral_limit,
+            safe_yaw_rate=self.config.smc_safe_yaw_rate,
+        )
+        self.adaptive_sliding_mode = AdaptiveSlidingModeController(
+            surface_gain=self.config.asmc_surface_gain,
+            adaptation_rate=self.config.asmc_adaptation_rate,
+            gain_min=self.config.asmc_gain_min,
+            gain_max=self.config.asmc_gain_max,
+            gain_decay=self.config.asmc_gain_decay,
+            boundary_layer=self.config.asmc_boundary_layer,
+        )
         self.ilos = ILOSPathFollower(
             lookahead=self.config.ilos_lookahead,
             integral_gain=self.config.ilos_integral_gain,
@@ -1056,6 +1255,8 @@ class ControllerCore:
         self.avoidance.reset()
         self.heading_pid.reset()
         self.speed_pid.reset()
+        self.sliding_mode.reset()
+        self.adaptive_sliding_mode.reset()
         self.navigation_yaw_rate_command = 0.0
         self.alignment_yaw_rate_command = 0.0
 
@@ -1068,6 +1269,8 @@ class ControllerCore:
         self.avoidance.reset()
         self.heading_pid.reset()
         self.speed_pid.reset()
+        self.sliding_mode.reset()
+        self.adaptive_sliding_mode.reset()
         self.navigation_yaw_rate_command = 0.0
         self.alignment_yaw_rate_command = 0.0
         return ControlCommand(
@@ -1193,6 +1396,8 @@ class ControllerCore:
     def _begin_alignment(self) -> None:
         if not self.alignment_active:
             self.heading_pid.reset()
+            self.sliding_mode.reset()
+            self.adaptive_sliding_mode.reset()
             self._reset_recovery()
             self.navigation_yaw_rate_command = 0.0
             self.alignment_yaw_rate_command = 0.0
@@ -1204,6 +1409,8 @@ class ControllerCore:
     ) -> ControlCommand:
         self.speed_pid.reset()
         self.heading_pid.reset()
+        self.sliding_mode.reset()
+        self.adaptive_sliding_mode.reset()
         self.navigation_yaw_rate_command = 0.0
         self.alignment_yaw_rate_command = 0.0
         self._reset_recovery()
@@ -1230,6 +1437,8 @@ class ControllerCore:
         vessel: Optional[VesselState] = None,
     ) -> ControlCommand:
         self.speed_pid.reset()
+        self.sliding_mode.reset()
+        self.adaptive_sliding_mode.reset()
         alignment_clearance = math.inf
         if vessel is not None and self.config.obstacle_avoidance_enabled:
             clearances = [
@@ -1297,6 +1506,8 @@ class ControllerCore:
             distance=distance,
             heading_error=heading_error,
             desired_yaw_rate=desired_yaw_rate,
+            turn_thrust=turn,
+            turn_limit=turn_limit,
             nearest_obstacle=alignment_clearance,
             collision_clearance=alignment_clearance,
             guidance_mode=self.guidance_mode,
@@ -2024,12 +2235,32 @@ class ControllerCore:
                 * desired_speed
                 * guidance.path_curvature
             )
-        target_yaw_rate = clamp(
-            self.config.navigation_heading_rate_gain * heading_error
-            + yaw_rate_feedforward,
-            -self.config.max_navigation_yaw_rate,
-            self.config.max_navigation_yaw_rate,
-        )
+        if self.config.heading_control_mode == 'nftsm':
+            self.adaptive_sliding_mode.reset()
+            target_yaw_rate = self.sliding_mode.update(
+                heading_error,
+                yaw_rate_feedforward,
+                dt,
+                self.config.max_navigation_yaw_rate,
+            )
+        elif self.config.heading_control_mode == 'asmc':
+            self.sliding_mode.reset()
+            target_yaw_rate = self.adaptive_sliding_mode.update(
+                heading_error,
+                vessel.yaw_rate if vessel.yaw_rate_valid else 0.0,
+                yaw_rate_feedforward,
+                dt,
+                self.config.max_navigation_yaw_rate,
+            )
+        else:
+            self.sliding_mode.reset()
+            self.adaptive_sliding_mode.reset()
+            target_yaw_rate = clamp(
+                self.config.navigation_heading_rate_gain * heading_error
+                + yaw_rate_feedforward,
+                -self.config.max_navigation_yaw_rate,
+                self.config.max_navigation_yaw_rate,
+            )
         if turn_sweep_risk:
             target_yaw_rate = 0.0
         if state == 'backing_away':
@@ -2121,6 +2352,8 @@ class ControllerCore:
                 guidance.upcoming_curvature if guidance else 0.0),
             yaw_rate_feedforward=yaw_rate_feedforward,
             desired_yaw_rate=desired_yaw_rate,
+            turn_thrust=turn,
+            turn_limit=turn_limit,
             path_points_body=path_points_body,
             path_projection_body=path_projection_body,
             lattice_expanded_states=self.lattice_expanded_states,

@@ -146,6 +146,7 @@ def _run_trial(
     launch_file: str,
     scenario_seed: Optional[int] = None,
     completion_grace: float = 2.0,
+    heading_control_mode: Optional[str] = None,
 ) -> dict:
     trial_dir = output_dir / f'trial_{index:02d}'
     trial_dir.mkdir(parents=True, exist_ok=True)
@@ -157,6 +158,9 @@ def _run_trial(
         'ros2', 'launch', 'han_usv_controller', launch_file,
         'headless:=True', 'rviz:=False', 'timed_competition:=False',
     ]
+    if heading_control_mode is not None:
+        launch_command.append(
+            f'heading_control_mode:={heading_control_mode}')
     manifest = None
     if scenario_seed is not None:
         manifest = layout_manifest(scenario_seed)
@@ -262,6 +266,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument('--max-waypoint-duration', type=float, default=0.0)
     parser.add_argument('--max-estimator-fallback-count', type=int, default=-1)
     parser.add_argument('--completion-grace', type=float, default=2.0)
+    parser.add_argument(
+        '--heading-control-mode',
+        choices=('pid', 'nftsm', 'asmc'),
+        default=None,
+        help='Override heading_control.mode for every evaluation trial')
     args = parser.parse_args(argv)
     if args.trials < 1:
         parser.error('--trials must be at least 1')
@@ -313,6 +322,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     else None
                 ),
                 args.completion_grace,
+                args.heading_control_mode,
             )
         except KeyboardInterrupt:
             print('Evaluation interrupted; child processes were cleaned up.')

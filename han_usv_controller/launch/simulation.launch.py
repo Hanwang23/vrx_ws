@@ -49,6 +49,7 @@ def _launch_setup(context):
     simulation_world = resolve_simulation_world(
         controller_share, requested_world, timed_competition)
     config = LaunchConfiguration('config')
+    heading_control_mode = LaunchConfiguration('heading_control_mode')
     robot_localization = LaunchConfiguration('robot_localization')
     robot_localization_config = LaunchConfiguration(
         'robot_localization_config')
@@ -83,6 +84,7 @@ def _launch_setup(context):
             {
                 'navigation.nearest_neighbor_order': (
                     not preserve_waypoint_order),
+                'heading_control.mode': heading_control_mode,
             },
         ],
         emulate_tty=True,
@@ -146,6 +148,11 @@ def generate_launch_description():
             'config',
             default_value=default_config,
             description='Controller parameter YAML file',
+        ),
+        DeclareLaunchArgument(
+            'heading_control_mode',
+            default_value='nftsm',
+            description='Heading controller: pid, nftsm, or asmc',
         ),
         DeclareLaunchArgument(
             'robot_localization',

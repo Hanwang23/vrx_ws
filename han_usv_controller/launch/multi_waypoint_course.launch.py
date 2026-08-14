@@ -45,7 +45,8 @@ def _launch_setup(context):
     forwarded = {
         name: LaunchConfiguration(name)
         for name in (
-            'config', 'headless', 'rviz', 'rviz_delay', 'rviz_config',
+            'config', 'heading_control_mode', 'headless', 'rviz',
+            'rviz_delay', 'rviz_config',
             'timed_competition', 'competition_mode', 'robot_localization',
             'robot_localization_config',
         )
@@ -71,6 +72,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'config',
             default_value=os.path.join(share, 'config', 'controller.yaml')),
+        DeclareLaunchArgument('heading_control_mode', default_value='nftsm'),
         DeclareLaunchArgument('headless', default_value='False'),
         DeclareLaunchArgument('rviz', default_value='True'),
         DeclareLaunchArgument('rviz_delay', default_value='6.0'),

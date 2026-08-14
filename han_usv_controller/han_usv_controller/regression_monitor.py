@@ -88,6 +88,25 @@ class RegressionMonitor(Node):
         self.waypoint_alignment_s = defaultdict(float)
         self.complete_observed_at = None
         self.official_metrics_ready_at = None
+        self.heading_control_mode_counts = Counter()
+        self.heading_control_samples = 0
+        self.heading_error_abs_sum = 0.0
+        self.heading_error_square_sum = 0.0
+        self.max_abs_heading_error = 0.0
+        self.yaw_rate_error_abs_sum = 0.0
+        self.yaw_rate_error_square_sum = 0.0
+        self.max_abs_yaw_rate_error = 0.0
+        self.turn_thrust_abs_sum = 0.0
+        self.turn_thrust_square_sum = 0.0
+        self.turn_thrust_impulse = 0.0
+        self.thruster_effort = 0.0
+        self.turn_total_variation = 0.0
+        self.turn_control_elapsed = 0.0
+        self.previous_turn_thrust = None
+        self.turn_saturated_samples = 0
+        self.asmc_gain_sum = 0.0
+        self.asmc_gain_samples = 0
+        self.max_asmc_gain = 0.0
         self.create_subscription(
             String, '/autonomous_usv/status', self._status_callback, 20)
         self.create_subscription(
@@ -136,6 +155,9 @@ class RegressionMonitor(Node):
         self.final = status
         now = time.monotonic()
         state = str(status.get('state', 'unknown'))
+        heading_control_mode = str(
+            status.get('heading_control_mode') or 'unknown')
+        self.heading_control_mode_counts[heading_control_mode] += 1
         target_index = int(status.get('target_index') or 0)
         target_count = int(status.get('target_count') or 0)
         if target_count > 0 and target_index < target_count:
@@ -172,6 +194,63 @@ class RegressionMonitor(Node):
         if self.last_status_time is not None:
             dt = min(0.25, max(0.0, now - self.last_status_time))
         self.last_status_time = now
+        heading_control_active = state in (
+            'navigating', 'approach_braking', 'curve_braking')
+        if heading_control_active:
+            heading_error = status.get('heading_error_deg')
+            yaw_rate = status.get('yaw_rate_deg_s')
+            desired_yaw_rate = status.get('desired_yaw_rate_deg_s')
+            turn_thrust = status.get('turn_thrust')
+            turn_limit = status.get('turn_limit')
+            left_thrust = status.get('left_thrust')
+            right_thrust = status.get('right_thrust')
+            finite_values = (
+                heading_error, yaw_rate, desired_yaw_rate,
+                turn_thrust, turn_limit, left_thrust, right_thrust,
+            )
+            if all(
+                value is not None and math.isfinite(float(value))
+                for value in finite_values
+            ):
+                heading_error = abs(float(heading_error))
+                yaw_rate_error = abs(
+                    float(desired_yaw_rate) - float(yaw_rate))
+                turn_thrust = float(turn_thrust)
+                turn_limit = abs(float(turn_limit))
+                self.heading_control_samples += 1
+                self.heading_error_abs_sum += heading_error
+                self.heading_error_square_sum += heading_error ** 2
+                self.max_abs_heading_error = max(
+                    self.max_abs_heading_error, heading_error)
+                self.yaw_rate_error_abs_sum += yaw_rate_error
+                self.yaw_rate_error_square_sum += yaw_rate_error ** 2
+                self.max_abs_yaw_rate_error = max(
+                    self.max_abs_yaw_rate_error, yaw_rate_error)
+                self.turn_thrust_abs_sum += abs(turn_thrust)
+                self.turn_thrust_square_sum += turn_thrust ** 2
+                self.turn_thrust_impulse += abs(turn_thrust) * dt
+                self.thruster_effort += (
+                    abs(float(left_thrust)) + abs(float(right_thrust))) * dt
+                if self.previous_turn_thrust is not None:
+                    self.turn_total_variation += abs(
+                        turn_thrust - self.previous_turn_thrust)
+                self.previous_turn_thrust = turn_thrust
+                self.turn_control_elapsed += dt
+                if turn_limit > 0.0 and abs(turn_thrust) >= 0.99 * turn_limit:
+                    self.turn_saturated_samples += 1
+                asmc_gain = status.get('asmc_adaptive_gain_deg_s')
+                if (
+                    asmc_gain is not None
+                    and math.isfinite(float(asmc_gain))
+                    and heading_control_mode == 'asmc'
+                ):
+                    asmc_gain = float(asmc_gain)
+                    self.asmc_gain_sum += asmc_gain
+                    self.asmc_gain_samples += 1
+                    self.max_asmc_gain = max(
+                        self.max_asmc_gain, asmc_gain)
+        else:
+            self.previous_turn_thrust = None
         rotating_in_place = (
             state in ('aligning', 'pivoting')
             and abs(float(status.get('speed_mps') or 0.0)) <= 0.25
@@ -322,6 +401,53 @@ class RegressionMonitor(Node):
             'max_alignment_command_yaw_rate_deg_s': (
                 self.max_alignment_command_yaw_rate
                 if self.yaw_rate_samples else None),
+            'heading_control_mode_counts': dict(
+                self.heading_control_mode_counts),
+            'heading_control_samples': self.heading_control_samples,
+            'mean_abs_heading_error_deg': (
+                self.heading_error_abs_sum / self.heading_control_samples
+                if self.heading_control_samples else None),
+            'rms_heading_error_deg': (
+                math.sqrt(
+                    self.heading_error_square_sum
+                    / self.heading_control_samples)
+                if self.heading_control_samples else None),
+            'max_abs_heading_error_deg': (
+                self.max_abs_heading_error
+                if self.heading_control_samples else None),
+            'mean_abs_yaw_rate_tracking_error_deg_s': (
+                self.yaw_rate_error_abs_sum / self.heading_control_samples
+                if self.heading_control_samples else None),
+            'rms_yaw_rate_tracking_error_deg_s': (
+                math.sqrt(
+                    self.yaw_rate_error_square_sum
+                    / self.heading_control_samples)
+                if self.heading_control_samples else None),
+            'max_abs_yaw_rate_tracking_error_deg_s': (
+                self.max_abs_yaw_rate_error
+                if self.heading_control_samples else None),
+            'mean_abs_turn_thrust': (
+                self.turn_thrust_abs_sum / self.heading_control_samples
+                if self.heading_control_samples else None),
+            'rms_turn_thrust': (
+                math.sqrt(
+                    self.turn_thrust_square_sum
+                    / self.heading_control_samples)
+                if self.heading_control_samples else None),
+            'integrated_abs_turn_thrust': self.turn_thrust_impulse,
+            'integrated_abs_thruster_command': self.thruster_effort,
+            'turn_thrust_total_variation': self.turn_total_variation,
+            'turn_thrust_variation_rate': (
+                self.turn_total_variation / self.turn_control_elapsed
+                if self.turn_control_elapsed > 0.0 else None),
+            'turn_saturation_fraction': (
+                self.turn_saturated_samples / self.heading_control_samples
+                if self.heading_control_samples else None),
+            'mean_asmc_adaptive_gain_deg_s': (
+                self.asmc_gain_sum / self.asmc_gain_samples
+                if self.asmc_gain_samples else None),
+            'max_asmc_adaptive_gain_deg_s': (
+                self.max_asmc_gain if self.asmc_gain_samples else None),
             'min_collision_clearance_m': (
                 self.min_collision_clearance
                 if math.isfinite(self.min_collision_clearance) else None),

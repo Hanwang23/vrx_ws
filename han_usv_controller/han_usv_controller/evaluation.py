@@ -319,6 +319,16 @@ def aggregate_trials(
     rotation_times = summary_values('in_place_rotation_s')
     continuous_rotation_times = summary_values('max_continuous_rotation_s')
     waypoint_duration_maxima = summary_values('max_waypoint_duration_s')
+    heading_error_means = summary_values('mean_abs_heading_error_deg')
+    heading_error_rms = summary_values('rms_heading_error_deg')
+    yaw_rate_error_means = summary_values(
+        'mean_abs_yaw_rate_tracking_error_deg_s')
+    yaw_rate_error_rms = summary_values(
+        'rms_yaw_rate_tracking_error_deg_s')
+    turn_efforts = summary_values('integrated_abs_turn_thrust')
+    thruster_efforts = summary_values('integrated_abs_thruster_command')
+    turn_variation_rates = summary_values('turn_thrust_variation_rate')
+    saturation_fractions = summary_values('turn_saturation_fraction')
     waypoint_error_values = [
         value
         for report in trial_reports
@@ -381,6 +391,22 @@ def aggregate_trials(
         'max_waypoint_duration_s': (
             max(waypoint_duration_maxima)
             if waypoint_duration_maxima else None),
+        'mean_abs_heading_error_deg': (
+            mean(heading_error_means) if heading_error_means else None),
+        'mean_rms_heading_error_deg': (
+            mean(heading_error_rms) if heading_error_rms else None),
+        'mean_abs_yaw_rate_tracking_error_deg_s': (
+            mean(yaw_rate_error_means) if yaw_rate_error_means else None),
+        'mean_rms_yaw_rate_tracking_error_deg_s': (
+            mean(yaw_rate_error_rms) if yaw_rate_error_rms else None),
+        'mean_integrated_abs_turn_thrust': (
+            mean(turn_efforts) if turn_efforts else None),
+        'mean_integrated_abs_thruster_command': (
+            mean(thruster_efforts) if thruster_efforts else None),
+        'mean_turn_thrust_variation_rate': (
+            mean(turn_variation_rates) if turn_variation_rates else None),
+        'mean_turn_saturation_fraction': (
+            mean(saturation_fractions) if saturation_fractions else None),
         'trials': list(trial_reports),
     }
 

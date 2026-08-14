@@ -1,6 +1,6 @@
 # VRX WAM-V 自主闭环控制器
 
-这是 `CLAUDE.md` 方案 C 的可运行实现，本次新增的源文件都位于 `han_usv_controller`。工作区根目录原有的 `autonomous_controller.py` 和 `launch_wayfinding.sh` 未被本方案修改。控制器订阅 GNSS、IMU、激光雷达扫描与点云和 VRX 任务目标，使用速度 PID 与受限角速度级联航向控制生成左右推进器命令。
+这是 `CLAUDE.md` 方案 C 的可运行实现，本次新增的源文件都位于 `han_usv_controller`。工作区根目录原有的 `autonomous_controller.py` 和 `launch_wayfinding.sh` 未被本方案修改。控制器订阅 GNSS、IMU、激光雷达扫描与点云和 VRX 任务目标，使用速度 PID 与受限角速度级联航向控制生成左右推进器命令。航向外环支持 `pid`、非奇异快速终端滑模 `nftsm` 和自适应滑模 `asmc` 三种模式；默认配置使用 `nftsm`。
 
 当前直接支持：
 
@@ -495,3 +495,34 @@ ros2 run han_usv_controller regression_monitor --timeout 600
 修改 `core.py`、`node.py` 或 YAML 后必须重新运行 `colcon build` 并再次 `source install/setup.bash`，否则 launch 仍可能启动旧安装版。
 
 Wayfinding 和 Stationkeeping 是运动控制任务。`navigation_task` 的红绿浮标识别、`wildlife_task` 的动物分类、扫描靠泊和声学任务还需要各自的视觉/声学任务层；本包为这些任务提供底层航行与避障能力，但不虚构尚未实现的识别器。
+
+
+# 基础完整闭环
+ros2 launch han_usv_controller simulation.launch.py
+
+# 低资源运行
+ros2 launch han_usv_controller simulation.launch.py headless:=True rviz:=False
+
+# 固定浮标避障
+ros2 launch han_usv_controller buoy_course.launch.py
+
+# 随机浮标
+ros2 launch han_usv_controller random_buoy_course.launch.py scenario_seed:=1000
+
+# 强制规划压力场
+ros2 launch han_usv_controller lattice_stress.launch.py
+
+# 八航点课程
+ros2 launch han_usv_controller multi_waypoint_course.launch.py
+
+# 动态目标与COLREGs
+ros2 launch han_usv_controller colregs_learning.launch.py
+
+# 查看控制器状态
+ros2 topic echo /autonomous_usv/status
+
+# 键盘遥控
+python3 virtual_joystick.py
+
+# 自动评测
+bash han_usv_controller/scripts/run_three_evaluations.sh
